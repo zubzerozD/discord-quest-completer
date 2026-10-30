@@ -1,0 +1,12 @@
+[package]
+name = "quest-runner"
+version = "0.1.0"
+edition = "2021"
+
+# Tiny dummy process. T2 replaces the stub with the real Win32 window.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
