@@ -72,6 +72,7 @@ fn list_running(state: tauri::State<'_, AppState>) -> Result<Vec<(String, u32)>,
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_http::init())
         .setup(|app| {
             let (runner, games_root) = resolve_layout()?;
             app.manage(AppState {

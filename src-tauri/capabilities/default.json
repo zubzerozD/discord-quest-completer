@@ -3,5 +3,14 @@
   "identifier": "default",
   "description": "Default capabilities for the main window",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://discord.com/api/*" },
+        { "url": "https://markterence.github.io/*" }
+      ]
+    }
+  ]
 }
