@@ -4,7 +4,9 @@ import {
   filterWindows,
   isValidPayload,
   loadCatalog,
+  pickExecutable,
   sanitize,
+  win32Executables,
   type CatalogDeps,
   type GameEntry,
   type Storage,
@@ -81,6 +83,55 @@ describe("filterWindows / sanitize", () => {
 
   it("sanitize returns filtered games for a good payload", () => {
     expect(sanitize([OVERWATCH, MAC_ONLY])).toEqual([OVERWATCH]);
+  });
+});
+
+describe("pickExecutable", () => {
+  const exe = (name: string, os: string, is_launcher = false) => ({
+    name,
+    os,
+    is_launcher,
+  });
+
+  it("returns null when the game has no win32 executable", () => {
+    const game: GameEntry = {
+      id: "1",
+      name: "Mac Only",
+      aliases: [],
+      executables: [exe("mac", "darwin")],
+    };
+    expect(pickExecutable(game)).toBeNull();
+  });
+
+  it("prefers a non-launcher win32 executable", () => {
+    const game: GameEntry = {
+      id: "1",
+      name: "Game",
+      aliases: [],
+      executables: [exe("launcher.exe", "win32", true), exe("game.exe", "win32")],
+    };
+    expect(pickExecutable(game)?.name).toBe("game.exe");
+  });
+
+  it("falls back to a launcher when it is the only win32 option", () => {
+    const game: GameEntry = {
+      id: "1",
+      name: "Game",
+      aliases: [],
+      executables: [exe("launcher.exe", "win32", true)],
+    };
+    expect(pickExecutable(game)?.name).toBe("launcher.exe");
+  });
+
+  it("ignores other-OS executables even when they appear first", () => {
+    const game: GameEntry = {
+      id: "1",
+      name: "Game",
+      aliases: [],
+      executables: [exe("macgame", "darwin"), exe("game.exe", "win32")],
+    };
+    expect(win32Executables(game).map((e) => e.name)).toEqual(["game.exe"]);
+    expect(pickExecutable(game)?.name).toBe("game.exe");
   });
 });
 

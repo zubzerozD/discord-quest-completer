@@ -85,6 +85,34 @@ export function sanitize(data: unknown): GameEntry[] | null {
   return filtered.length > 0 ? filtered : null;
 }
 
+/** Win32 executables of a game, in catalog order. */
+export function win32Executables(game: GameEntry): Executable[] {
+  if (!Array.isArray(game.executables)) {
+    return [];
+  }
+  return game.executables.filter(
+    (exe): exe is Executable =>
+      typeof exe === "object" &&
+      exe !== null &&
+      typeof exe.name === "string" &&
+      exe.os === "win32",
+  );
+}
+
+/**
+ * The executable this app will place as the dummy: the first win32
+ * non-launcher entry, falling back to any win32 entry (some games only
+ * register a launcher), or null when the game has no win32 executable.
+ * A wrong pick here means Discord never detects the game, so the rule
+ * is unit-tested (S1 payload).
+ */
+export function pickExecutable(game: GameEntry): Executable | null {
+  const candidates = win32Executables(game);
+  return (
+    candidates.find((exe) => !exe.is_launcher) ?? candidates[0] ?? null
+  );
+}
+
 interface CacheEntry {
   t: number;
   games: GameEntry[];
