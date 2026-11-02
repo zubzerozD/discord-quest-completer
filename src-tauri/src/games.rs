@@ -6,7 +6,7 @@
 //! `taskkill /IM` bug is structurally impossible here.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command};
 
 /// Outcome of a play request, returned to the frontend.
@@ -33,6 +33,32 @@ pub fn validate_component(value: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Validates an executable path from the catalog. May be a nested relative
+/// path ("hackgu/hackgu.exe" is real data), but every component must be a
+/// plain name so the path can never escape the game directory.
+pub fn validate_executable(value: &str) -> Result<(), String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("empty path component".into());
+    }
+    if trimmed.contains(':') {
+        return Err(format!("drive letters and streams not allowed in {value:?}"));
+    }
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return Err(format!("absolute path not allowed in {value:?}"));
+    }
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => {}
+            other => {
+                return Err(format!("unsafe path component {other:?} in {value:?}"));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Builds `games/<app_id>` under the games root, validating `app_id`.
 pub fn game_dir(games_root: &Path, app_id: &str) -> Result<PathBuf, String> {
     validate_component(app_id)?;
@@ -49,10 +75,15 @@ pub fn prepare_game(
     runner_src: &Path,
 ) -> Result<PathBuf, String> {
     let dir = game_dir(games_root, app_id)?;
-    validate_component(executable)?;
+    validate_executable(executable)?;
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let target = dir.join(executable);
+    // Nested executables ("sub/game.exe") need their parent directory.
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
     std::fs::copy(runner_src, &target)
         .map_err(|e| format!("cannot copy runner to {}: {e}", target.display()))?;
     Ok(dir)
@@ -95,25 +126,30 @@ impl RunningGames {
         }
     }
 
-    /// Ensures `game_dir/<executable>` exists, then starts it (guarding
-    /// against a duplicate spawn for the same app id).
+    /// Ensures `games_root/<app_id>/<executable>` exists (copying the runner
+    /// template when missing), then starts it, guarding against a duplicate
+    /// spawn for the same app id. Preparing here keeps the "Play just works"
+    /// contract in one place instead of relying on callers to pre-create.
     pub fn play(
         &mut self,
         app_id: &str,
-        game_dir: &Path,
+        games_root: &Path,
         executable: &str,
         title: &str,
+        runner_src: &Path,
     ) -> Result<PlayOutcome, String> {
+        validate_executable(executable)?;
         if let Some(pid) = self.active_pid(app_id) {
             return Ok(PlayOutcome::AlreadyRunning { pid });
         }
-        let exe_path = game_dir.join(executable);
+        let dir = game_dir(games_root, app_id)?;
+        let exe_path = dir.join(executable);
         if !exe_path.is_file() {
-            return Err(format!("dummy game missing: {}", exe_path.display()));
+            prepare_game(games_root, app_id, executable, runner_src)?;
         }
         let child = Command::new(&exe_path)
             .args(["--title", title])
-            .current_dir(game_dir)
+            .current_dir(&dir)
             .spawn()
             .map_err(|e| format!("cannot start {}: {e}", exe_path.display()))?;
         let pid = child.id();
@@ -217,6 +253,39 @@ mod tests {
         }
     }
 
+    // --- validate_executable (nested paths are real catalog data) ---
+
+    #[test]
+    fn accepts_nested_executables_from_the_catalog() {
+        // Real entries look like {"name": "hackgu/hackgu.exe"}: a relative
+        // path inside the game dir, which must stay allowed.
+        for good in ["game.exe", "hackgu/hackgu.exe", "sub/dir/Game.exe"] {
+            assert!(
+                validate_executable(good).is_ok(),
+                "expected {good:?} to be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unsafe_executables() {
+        for bad in [
+            "",
+            "..",
+            "../evil.exe",
+            "a/../../evil.exe",
+            "/abs.exe",
+            "C:\\evil.exe",
+            "C:evil",
+            ".\\game.exe",
+        ] {
+            assert!(
+                validate_executable(bad).is_err(),
+                "expected rejection for {bad:?}"
+            );
+        }
+    }
+
     // --- game_dir / prepare_game ---
 
     #[test]
@@ -259,11 +328,53 @@ mod tests {
     // --- play / stop lifecycle (real processes in temp dirs) ---
 
     #[test]
+    fn play_prepares_the_dummy_when_missing() {
+        // Contract test: play's docstring promises the dummy exists before
+        // spawn, so calling play on a virgin games root must work without a
+        // prior prepare_game() call (the frontend relies on this).
+        let root = temp_root("autoshape");
+        let mut games = RunningGames::new();
+        match games
+            .play("7", &root, EXE, "Auto Prepared", &runner_src())
+            .unwrap()
+        {
+            PlayOutcome::Started { pid } => assert!(pid > 0),
+            other => panic!("expected Started, got {other:?}"),
+        }
+        assert!(root.join("7").join(EXE).is_file(), "dummy was prepared");
+        games.stop("7").ok();
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn play_prepares_nested_executables() {
+        // The user-visible bug: catalog entries like "hackgu/hackgu.exe"
+        // were rejected, so Play silently failed for those games.
+        let root = temp_root("nested");
+        let mut games = RunningGames::new();
+        match games
+            .play("n", &root, "sub/game.exe", "Nested", &runner_src())
+            .unwrap()
+        {
+            PlayOutcome::Started { pid } => assert!(pid > 0),
+            other => panic!("expected Started, got {other:?}"),
+        }
+        assert!(
+            root.join("n").join("sub").join("game.exe").is_file(),
+            "nested dummy prepared"
+        );
+        games.stop("n").ok();
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
     fn play_starts_and_reports_pid() {
         let root = temp_root("play");
-        let dir = prepare_game(&root, "1", EXE, &runner_src()).unwrap();
         let mut games = RunningGames::new();
-        match games.play("1", &dir, EXE, "Fake Game").unwrap() {
+        match games
+            .play("1", &root, EXE, "Fake Game", &runner_src())
+            .unwrap()
+        {
             PlayOutcome::Started { pid } => assert!(pid > 0),
             other => panic!("expected Started, got {other:?}"),
         }
@@ -276,13 +387,17 @@ mod tests {
     #[test]
     fn double_play_does_not_spawn_duplicate() {
         let root = temp_root("dup");
-        let dir = prepare_game(&root, "2", EXE, &runner_src()).unwrap();
         let mut games = RunningGames::new();
-        let first = games.play("2", &dir, EXE, "Fake Game").unwrap();
+        let first = games
+            .play("2", &root, EXE, "Fake Game", &runner_src())
+            .unwrap();
         let PlayOutcome::Started { pid: first_pid } = first else {
             panic!("first play must start");
         };
-        match games.play("2", &dir, EXE, "Fake Game").unwrap() {
+        match games
+            .play("2", &root, EXE, "Fake Game", &runner_src())
+            .unwrap()
+        {
             PlayOutcome::AlreadyRunning { pid } => {
                 assert_eq!(pid, first_pid, "same instance reported")
             }
@@ -295,11 +410,9 @@ mod tests {
     #[test]
     fn stop_leaves_same_name_sibling_untouched() {
         let root = temp_root("sibling");
-        let dir_a = prepare_game(&root, "a", EXE, &runner_src()).unwrap();
-        let dir_b = prepare_game(&root, "b", EXE, &runner_src()).unwrap();
         let mut games = RunningGames::new();
-        games.play("a", &dir_a, EXE, "Copy A").unwrap();
-        games.play("b", &dir_b, EXE, "Copy B").unwrap();
+        games.play("a", &root, EXE, "Copy A", &runner_src()).unwrap();
+        games.play("b", &root, EXE, "Copy B", &runner_src()).unwrap();
 
         assert_eq!(games.stop("a").unwrap(), true, "a killed");
 
@@ -318,9 +431,8 @@ mod tests {
     #[test]
     fn stale_entry_is_pruned_on_next_play() {
         let root = temp_root("stale");
-        let dir = prepare_game(&root, "3", EXE, &runner_src()).unwrap();
         let mut games = RunningGames::new();
-        games.play("3", &dir, EXE, "Fake Game").unwrap();
+        games.play("3", &root, EXE, "Fake Game", &runner_src()).unwrap();
         let pid = games.active_pid("3").unwrap();
 
         // Kill externally (the child died without going through stop()).
@@ -330,7 +442,10 @@ mod tests {
             .unwrap();
         assert!(status.success());
 
-        match games.play("3", &dir, EXE, "Fake Game").unwrap() {
+        match games
+            .play("3", &root, EXE, "Fake Game", &runner_src())
+            .unwrap()
+        {
             PlayOutcome::Started { pid: new_pid } => {
                 assert_ne!(new_pid, pid, "stale entry replaced by a fresh spawn");
             }
@@ -343,11 +458,9 @@ mod tests {
     #[test]
     fn stop_all_kills_every_tracked_instance() {
         let root = temp_root("all");
-        let dir_a = prepare_game(&root, "x", EXE, &runner_src()).unwrap();
-        let dir_b = prepare_game(&root, "y", EXE, &runner_src()).unwrap();
         let mut games = RunningGames::new();
-        games.play("x", &dir_a, EXE, "X").unwrap();
-        games.play("y", &dir_b, EXE, "Y").unwrap();
+        games.play("x", &root, EXE, "X", &runner_src()).unwrap();
+        games.play("y", &root, EXE, "Y", &runner_src()).unwrap();
 
         assert_eq!(games.stop_all(), 2, "both instances killed");
         assert!(games.entries.is_empty(), "map empty after stop_all");
@@ -357,9 +470,8 @@ mod tests {
     #[test]
     fn running_snapshot_reports_live_pids() {
         let root = temp_root("snap");
-        let dir = prepare_game(&root, "9", EXE, &runner_src()).unwrap();
         let mut games = RunningGames::new();
-        games.play("9", &dir, EXE, "Fake Game").unwrap();
+        games.play("9", &root, EXE, "Fake Game", &runner_src()).unwrap();
         let snap = games.running_snapshot();
         assert_eq!(snap.len(), 1);
         assert_eq!(snap[0].0, "9");

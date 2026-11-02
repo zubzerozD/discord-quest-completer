@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { listRunning, playGame, stopGame } from "./backend";
 import { pickExecutable, type GameEntry } from "./catalog/catalog";
 import { createSearch, sortByName } from "./catalog/search";
 import { useCatalog } from "./catalog/useCatalog";
 import { useFavorites } from "./favorites/useFavorites";
+import { notifyQuestComplete } from "./notify";
+import { useQuestTimer } from "./timer/useQuestTimer";
 
 /** Caps rendered rows: the catalog holds 10k+ games; the DOM must not. */
 const VISIBLE_LIMIT = 200;
@@ -43,6 +45,24 @@ function isPlaying(id: string): boolean {
   return id in playing.value;
 }
 
+/** S5: at 00:00 notify the user and auto-close the tracked dummy. */
+async function onTimerExpired(appId: string): Promise<void> {
+  const game = games.value.find((g) => g.id === appId);
+  try {
+    await stopGame(appId);
+    const next = { ...playing.value };
+    delete next[appId];
+    playing.value = next;
+  } catch (e) {
+    actionError.value = e instanceof Error ? e.message : String(e);
+  }
+  await notifyQuestComplete(game?.name ?? "the game");
+}
+
+const questTimer = useQuestTimer((appId) => {
+  void onTimerExpired(appId);
+});
+
 function favoriteLabel(game: GameEntry): string {
   return `${isFavorite(game.id) ? "Unfavorite" : "Favorite"} ${game.name}`;
 }
@@ -66,6 +86,7 @@ async function onPlay(game: GameEntry): Promise<void> {
   try {
     const outcome = await playGame(game.id, executable.name, game.name);
     playing.value = { ...playing.value, [game.id]: outcome.pid };
+    questTimer.start(game.id);
   } catch (e) {
     actionError.value = e instanceof Error ? e.message : String(e);
   }
@@ -75,6 +96,7 @@ async function onStop(game: GameEntry): Promise<void> {
   actionError.value = null;
   try {
     await stopGame(game.id);
+    questTimer.stop(game.id);
     const next = { ...playing.value };
     delete next[game.id];
     playing.value = next;
@@ -86,6 +108,10 @@ async function onStop(game: GameEntry): Promise<void> {
 onMounted(() => {
   void refresh();
   void refreshRunning();
+});
+
+onBeforeUnmount(() => {
+  questTimer.dispose();
 });
 </script>
 
@@ -121,6 +147,13 @@ onMounted(() => {
             ★
           </button>
           <span class="name">{{ game.name }}</span>
+          <span
+            v-if="isPlaying(game.id) && questTimer.label(game.id)"
+            class="countdown"
+            :aria-label="`Quest timer ${questTimer.label(game.id)}`"
+          >
+            ⏱ {{ questTimer.label(game.id) }}
+          </span>
           <button
             class="play"
             :disabled="!pickExecutable(game)"
@@ -147,6 +180,13 @@ onMounted(() => {
             {{ isFavorite(game.id) ? "★" : "☆" }}
           </button>
           <span class="name">{{ game.name }}</span>
+          <span
+            v-if="isPlaying(game.id) && questTimer.label(game.id)"
+            class="countdown"
+            :aria-label="`Quest timer ${questTimer.label(game.id)}`"
+          >
+            ⏱ {{ questTimer.label(game.id) }}
+          </span>
           <button
             class="play"
             :disabled="!pickExecutable(game)"
@@ -217,6 +257,12 @@ li:hover {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.countdown {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+  color: #57f287;
   white-space: nowrap;
 }
 .star {

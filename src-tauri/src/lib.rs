@@ -44,6 +44,7 @@ fn ensure_game(
 }
 
 /// Starts the dummy for a game unless it is already running.
+/// `play` prepares the dummy itself when missing (single-call contract).
 #[tauri::command]
 fn play_game(
     app_id: String,
@@ -51,9 +52,14 @@ fn play_game(
     title: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<PlayOutcome, String> {
-    let dir = games::game_dir(&state.games_root, &app_id)?;
     let mut running = state.running.lock().map_err(|e| e.to_string())?;
-    running.play(&app_id, &dir, &executable, &title)
+    running.play(
+        &app_id,
+        &state.games_root,
+        &executable,
+        &title,
+        &state.runner,
+    )
 }
 
 /// Stops only the instance this app started for `app_id`.
@@ -73,6 +79,7 @@ fn list_running(state: tauri::State<'_, AppState>) -> Result<Vec<(String, u32)>,
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let (runner, games_root) = resolve_layout()?;
             app.manage(AppState {
