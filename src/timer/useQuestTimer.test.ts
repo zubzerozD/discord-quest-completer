@@ -18,13 +18,13 @@ describe("useQuestTimer", () => {
     timer.dispose();
   });
 
-  it("counts down from 15:00 while running", () => {
+  it("counts down from 15:10 while running", () => {
     const timer = useQuestTimer(() => {});
     timer.start("g1");
-    expect(timer.label("g1")).toBe("15:00");
+    expect(timer.label("g1")).toBe("15:10");
 
     vi.advanceTimersByTime(61_000); // ticks fire every 250ms
-    expect(timer.label("g1")).toBe("13:59");
+    expect(timer.label("g1")).toBe("14:09");
     timer.dispose();
   });
 
@@ -59,10 +59,10 @@ describe("useQuestTimer", () => {
     const timer = useQuestTimer(onExpire);
     timer.start("g1");
     vi.advanceTimersByTime(10 * 60_000);
-    expect(timer.label("g1")).toBe("05:00");
+    expect(timer.label("g1")).toBe("05:10");
 
-    timer.start("g1"); // play again: fresh 15 minutes
-    expect(timer.label("g1")).toBe("15:00");
+    timer.start("g1"); // play again: fresh full duration
+    expect(timer.label("g1")).toBe("15:10");
     vi.advanceTimersByTime(10 * 60_000);
     expect(onExpire).not.toHaveBeenCalled(); // first deadline was replaced
     timer.dispose();
@@ -75,8 +75,8 @@ describe("useQuestTimer", () => {
     vi.advanceTimersByTime(60_000);
     timer.start("b");
 
-    expect(timer.label("a")).toBe("14:00");
-    expect(timer.label("b")).toBe("15:00");
+    expect(timer.label("a")).toBe("14:10");
+    expect(timer.label("b")).toBe("15:10");
     timer.dispose();
   });
 

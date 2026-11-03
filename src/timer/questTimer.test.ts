@@ -10,8 +10,11 @@ import {
 const T0 = 1_700_000_000_000;
 
 describe("QUEST_DURATION_MS", () => {
-  it("is exactly 15 minutes", () => {
-    expect(QUEST_DURATION_MS).toBe(15 * 60 * 1000);
+  it("is 15 minutes plus a 10-second Discord-detection margin", () => {
+    // User (S5 change): Discord takes seconds to detect the running game,
+    // so closing exactly at 15:00 risks losing the last credited seconds.
+    // Chosen 15:10 over 15:05 for extra margin; the cost is 10 seconds.
+    expect(QUEST_DURATION_MS).toBe(15 * 60 * 1000 + 10 * 1000);
   });
 
   it("honors a VITE_QUEST_DURATION_MS override for testing", async () => {
@@ -64,8 +67,8 @@ describe("isComplete", () => {
 });
 
 describe("formatCountdown", () => {
-  it("formats the full duration as 15:00", () => {
-    expect(formatCountdown(QUEST_DURATION_MS)).toBe("15:00");
+  it("formats the full duration as 15:10", () => {
+    expect(formatCountdown(QUEST_DURATION_MS)).toBe("15:10");
   });
 
   it("formats minutes and seconds with zero padding", () => {

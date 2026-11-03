@@ -3,13 +3,20 @@
 //! The UI owns scheduling (setInterval); this module owns the math.
 
 /**
- * Discord quests require ~15 minutes of "playing".
- * `VITE_QUEST_DURATION_MS` overrides the duration (test/dev seam used by the
- * end-to-end probe; unset in normal use, so production is always 15 min).
+ * Discord quests require ~15 minutes of "playing". The dummy outlives the
+ * nominal 15 minutes by a safety margin: Discord detects the running game
+ * with a delay of seconds, so closing exactly at 15:00 risks losing the
+ * last credited seconds (user chose 15:10 over 15:05 for extra margin).
+ * `VITE_QUEST_DURATION_MS` overrides the whole duration (test/dev seam used
+ * by the end-to-end probe; unset in normal use, so production is 15:10).
  */
+const QUEST_NOMINAL_MS = 15 * 60 * 1000;
+const DISCORD_DETECTION_MARGIN_MS = 10 * 1000;
 const override = Number(import.meta.env.VITE_QUEST_DURATION_MS);
 export const QUEST_DURATION_MS =
-  Number.isFinite(override) && override > 0 ? override : 15 * 60 * 1000;
+  Number.isFinite(override) && override > 0
+    ? override
+    : QUEST_NOMINAL_MS + DISCORD_DETECTION_MARGIN_MS;
 
 /**
  * Remaining milliseconds until `deadline`, clamped at 0 so a stalled tab
