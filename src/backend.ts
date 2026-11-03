@@ -26,3 +26,8 @@ export function stopGame(appId: string): Promise<boolean> {
 export function listRunning(): Promise<Array<[string, number]>> {
   return invoke<Array<[string, number]>>("list_running");
 }
+
+/** Removes stale game folders (running games' folders are kept). S6. */
+export function cleanupGames(): Promise<string[]> {
+  return invoke<string[]>("cleanup_games");
+}

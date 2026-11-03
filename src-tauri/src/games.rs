@@ -191,6 +191,55 @@ impl RunningGames {
             .filter_map(|app_id| self.active_pid(&app_id).map(|pid| (app_id, pid)))
             .collect()
     }
+
+    /// Removes app folders under `games_root` whose dummy is not running.
+    /// Only direct children of the root are considered; a folder survives
+    /// when its dummy is tracked and alive, or when deletion fails (e.g. a
+    /// locked exe from an orphaned session). Returns the removed app ids.
+    pub fn cleanup_stale_dirs(&mut self, games_root: &Path) -> Vec<String> {
+        // Prune dead children first so a crashed dummy doesn't protect its
+        // folder: entries only exist for this session, stale ones must not
+        // count as "running".
+        let mut dead: Vec<String> = Vec::new();
+        for (id, child) in self.entries.iter_mut() {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                dead.push(id.clone());
+            }
+        }
+        for id in dead {
+            self.entries.remove(&id);
+        }
+
+        let mut removed = Vec::new();
+        let Ok(read_dir) = std::fs::read_dir(games_root) else {
+            return removed; // fresh install: no root yet
+        };
+        for entry in read_dir.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            // Plain directories only: never follow a symlink out of the root.
+            if file_type.is_symlink() || !file_type.is_dir() {
+                continue;
+            }
+            let file_name = entry.file_name();
+            let Some(name) = file_name.to_str() else {
+                continue;
+            };
+            if validate_component(name).is_err() {
+                continue; // defensive: only touch names we could have created
+            }
+            if self.entries.contains_key(name) {
+                continue; // dummy alive — S6: running game's folder survives
+            }
+            // Best effort: a locked exe (orphan from a killed session) makes
+            // removal fail and the folder simply survives untouched.
+            if std::fs::remove_dir_all(entry.path()).is_ok() {
+                removed.push(name.to_string());
+            }
+        }
+        removed
+    }
 }
 
 #[cfg(test)]
@@ -477,6 +526,71 @@ mod tests {
         assert_eq!(snap[0].0, "9");
         assert!(snap[0].1 > 0);
         games.stop("9").ok();
+        fs::remove_dir_all(&root).ok();
+    }
+
+    // --- cleanup (S6) ---
+
+    #[test]
+    fn cleanup_removes_stale_folders_but_keeps_running_ones() {
+        // S6 acceptance: play several games across restarts ⇒ stale folders
+        // removed; running game's folder survives.
+        let root = temp_root("cleanup");
+        let mut games = RunningGames::new();
+        prepare_game(&root, "stale1", EXE, &runner_src()).unwrap();
+        prepare_game(&root, "stale2", EXE, &runner_src()).unwrap();
+        games.play("live", &root, EXE, "Live", &runner_src()).unwrap();
+
+        let mut removed = games.cleanup_stale_dirs(&root);
+        removed.sort();
+        assert_eq!(removed, vec!["stale1".to_string(), "stale2".to_string()]);
+        assert!(!root.join("stale1").exists(), "stale1 removed");
+        assert!(!root.join("stale2").exists(), "stale2 removed");
+        assert!(
+            root.join("live").join(EXE).is_file(),
+            "running game's folder survives"
+        );
+
+        games.stop("live").ok();
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn cleanup_prunes_dead_entries_before_deciding() {
+        // A dummy killed outside our control must not protect its folder.
+        let root = temp_root("cleanup-dead");
+        let mut games = RunningGames::new();
+        games.play("dead", &root, EXE, "Dead", &runner_src()).unwrap();
+        let pid = games.active_pid("dead").unwrap();
+        let status = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let removed = games.cleanup_stale_dirs(&root);
+        assert_eq!(removed, vec!["dead".to_string()]);
+        assert!(!root.join("dead").exists(), "dead entry's folder removed");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn cleanup_is_scoped_to_the_root_and_tolerant() {
+        let root = temp_root("cleanup-scope");
+        let mut games = RunningGames::new();
+        assert!(
+            games.cleanup_stale_dirs(&root).is_empty(),
+            "missing root tolerated"
+        );
+
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("stray.txt"), "keep").unwrap();
+        fs::create_dir_all(root.join("old-game")).unwrap();
+
+        let removed = games.cleanup_stale_dirs(&root);
+        assert_eq!(removed, vec!["old-game".to_string()]);
+        assert!(root.join("stray.txt").exists(), "files untouched");
+        assert!(!root.join("old-game").exists());
         fs::remove_dir_all(&root).ok();
     }
 }

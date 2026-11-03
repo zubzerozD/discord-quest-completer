@@ -76,6 +76,14 @@ fn list_running(state: tauri::State<'_, AppState>) -> Result<Vec<(String, u32)>,
     Ok(running.running_snapshot())
 }
 
+/// Removes app folders whose dummy is not running (S6, on-demand path).
+/// Returns the app ids removed; running games' folders are never touched.
+#[tauri::command]
+fn cleanup_games(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    let mut running = state.running.lock().map_err(|e| e.to_string())?;
+    Ok(running.cleanup_stale_dirs(&state.games_root))
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_http::init())
@@ -87,6 +95,17 @@ pub fn run() {
                 games_root,
                 running: Mutex::new(RunningGames::new()),
             });
+            // S6: startup cleanup — stale folders from previous sessions go,
+            // running dummies' folders survive (none can run yet at startup,
+            // but locked exes from a killed session are skipped by removal).
+            if let Some(state) = app.try_state::<AppState>() {
+                if let Ok(mut running) = state.running.lock() {
+                    let removed = running.cleanup_stale_dirs(&state.games_root);
+                    if !removed.is_empty() {
+                        eprintln!("cleanup: removed {} stale game folder(s)", removed.len());
+                    }
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -106,7 +125,8 @@ pub fn run() {
             ensure_game,
             play_game,
             stop_game,
-            list_running
+            list_running,
+            cleanup_games
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

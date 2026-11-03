@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { listRunning, playGame, stopGame } from "./backend";
+import { cleanupGames, listRunning, playGame, stopGame } from "./backend";
 import { pickExecutable, type GameEntry } from "./catalog/catalog";
 import { createSearch, sortByName } from "./catalog/search";
 import { useCatalog } from "./catalog/useCatalog";
@@ -105,6 +105,26 @@ async function onStop(game: GameEntry): Promise<void> {
   }
 }
 
+const cleaning = ref(false);
+const cleanupNote = ref("");
+
+/** On-demand cleanup (S6): running games keep their folders. */
+async function onCleanup(): Promise<void> {
+  cleaning.value = true;
+  actionError.value = null;
+  cleanupNote.value = "";
+  try {
+    const removed = await cleanupGames();
+    cleanupNote.value = removed.length
+      ? `Removed ${removed.length} stale folder${removed.length > 1 ? "s" : ""}.`
+      : "Nothing to clean up.";
+  } catch (e) {
+    actionError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    cleaning.value = false;
+  }
+}
+
 onMounted(() => {
   void refresh();
   void refreshRunning();
@@ -125,6 +145,15 @@ onBeforeUnmount(() => {
         {{ sourceLabel }} · {{ games.length.toLocaleString() }} games
       </p>
       <p v-if="actionError" class="status error">{{ actionError }}</p>
+      <p v-if="cleanupNote" class="status">{{ cleanupNote }}</p>
+      <button
+        class="cleanup"
+        :disabled="cleaning"
+        aria-label="Clean up stale game folders"
+        @click="onCleanup"
+      >
+        {{ cleaning ? "Cleaning…" : "Clean up folders" }}
+      </button>
     </header>
 
     <input
@@ -292,6 +321,24 @@ li:hover {
 }
 .play:not(:disabled):hover {
   background: #4752c4;
+}
+.cleanup {
+  background: none;
+  border: 1px solid #3f4147;
+  border-radius: 6px;
+  color: #b5bac1;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  margin-top: 0.35rem;
+}
+.cleanup:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.cleanup:not(:disabled):hover {
+  border-color: #5865f2;
+  color: #f2f3f5;
 }
 .empty {
   color: #b5bac1;
