@@ -9,8 +9,7 @@
     {
       "identifier": "http:default",
       "allow": [
-        { "url": "https://discord.com/api/*" },
-        { "url": "https://markterence.github.io/*" }
+        { "url": "https://discord.com/api/*" }
       ]
     }
   ]

@@ -72,3 +72,4 @@ jobs:
             * WebView2 Runtime (incluido en Windows 10/11 por defecto)
           releaseDraft: false
           prerelease: false
+

@@ -39,3 +39,4 @@ jobs:
 
       - name: Vite build check
         run: pnpm build
+

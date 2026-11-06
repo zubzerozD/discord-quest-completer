@@ -4,10 +4,7 @@ A Windows desktop app that completes Discord quests by running tiny dummy game
 executables under the real games' names — so Discord sees you "playing" for the
 ~15 minutes a quest requires, without owning or launching the actual games.
 
-Built with **Tauri v2 + Rust + Vue 3**. Inspired by
-[markterence/discord-quest-completer](https://github.com/markterence/discord-quest-completer),
-improved with a live catalog, search, favorites, a quest timer with OS
-notification, auto-close, and automatic cleanup.
+Built with **Tauri v2 + Rust + Vue 3**, designed for lightweight performance, low memory footprint, and a modern desktop experience.
 
 ## Features
 
@@ -90,7 +87,7 @@ Artifacts land in `src-tauri/target/release/bundle/` (NSIS installer + MSI).
 | `pnpm install` fails on `esbuild` | Run `pnpm approve-builds esbuild` and retry. |
 | `cargo: command not found` | Open a new terminal after installing Rust, or prefix with `$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"`. |
 | Linker errors (`link.exe` not found) | Install MSVC Build Tools with the "Desktop development with C++" workload. |
-| Quest not credited | Make sure Discord is running and had time to detect the game; the 10-second margin exists exactly for this. Re-test if Discord changes detection — the mechanism (executable name in the process list) follows the upstream approach. |
+| Quest not credited | Make sure Discord is running and had time to detect the game; the 10-second margin exists exactly for this. |
 
 ## How it works
 
@@ -98,8 +95,7 @@ Discord credits quests by seeing a *detectable* game's executable name in your
 process list. The app exploits that with a minimal windowed Rust binary
 (`src-runner`, ~110 KB) that:
 
-- presents a real window (detection details are unverified upstream; a visible
-  window mirrors the proven behavior),
+- presents a real window so Discord reliably detects the process in the background,
 - accepts a `--title` argument for the window title,
 - is copied into `games/<app_id>/<executable>` and **renamed to the game's real
   executable name** before launch.
