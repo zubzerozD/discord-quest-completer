@@ -117,4 +117,5 @@ collateral damage to unrelated processes with the same name.
 
 ## License
 
-See the upstream project for license details.
+Copyright (c) 2026 zubzerozD. All rights reserved.
+See [LICENSE](LICENSE) for details.

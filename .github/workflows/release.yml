@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag de versión (ej. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            src-runner
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build dummy runner
+        run: pnpm runner:win
+
+      - name: Build Tauri app and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag_name }}
+          releaseName: 'Discord Quest Completer v__VERSION__'
+          releaseBody: |
+            ## Discord Quest Completer v__VERSION__
+
+            ### Instalación
+            Descarga el instalador de Windows adjunto abajo:
+            * **Instalador NSIS:** `Discord Quest Completer_..._x64-setup.exe` (Recomendado)
+            * **Paquete MSI:** `Discord Quest Completer_..._x64.msi`
+
+            ### Requisitos
+            * Windows 10/11 (64-bit)
+            * WebView2 Runtime (incluido en Windows 10/11 por defecto)
+          releaseDraft: false
+          prerelease: false
