@@ -13,7 +13,8 @@
     "tauri": "tauri",
     "build:runner:win": "cargo build --release --manifest-path src-runner/Cargo.toml",
     "copy:runner:win": "node scripts/copy-runner.mjs",
-    "runner:win": "pnpm build:runner:win && pnpm copy:runner:win"
+    "runner:win": "pnpm build:runner:win && pnpm copy:runner:win",
+    "dist:win": "pnpm runner:win && pnpm tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",
