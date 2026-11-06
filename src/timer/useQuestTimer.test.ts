@@ -89,4 +89,23 @@ describe("useQuestTimer", () => {
     vi.advanceTimersByTime(QUEST_DURATION_MS + 2_000);
     expect(onExpire).not.toHaveBeenCalled();
   });
+
+  it("progress starts at 0 and reaches 1 at the deadline", () => {
+    const timer = useQuestTimer(() => {});
+    timer.start("g1");
+    expect(timer.progress("g1")).toBeCloseTo(0, 1);
+
+    vi.advanceTimersByTime(QUEST_DURATION_MS / 2);
+    expect(timer.progress("g1")).toBeCloseTo(0.5, 1);
+
+    vi.advanceTimersByTime(QUEST_DURATION_MS / 2 + 1_000);
+    expect(timer.progress("g1")).toBe(1);
+    timer.dispose();
+  });
+
+  it("progress returns 0 for a game with no timer", () => {
+    const timer = useQuestTimer(() => {});
+    expect(timer.progress("unknown")).toBe(0);
+    timer.dispose();
+  });
 });

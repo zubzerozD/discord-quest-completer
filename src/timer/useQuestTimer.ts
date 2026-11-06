@@ -7,6 +7,7 @@ import { ref } from "vue";
 import {
   formatCountdown,
   isComplete,
+  QUEST_DURATION_MS,
   questDeadline,
   remainingMs,
 } from "./questTimer";
@@ -55,10 +56,18 @@ export function useQuestTimer(onExpire: (appId: string) => void) {
     return formatCountdown(remainingMs(deadline, now.value));
   }
 
+  /** Progress 0→1 for the visual bar; 0 = just started, 1 = done. */
+  function progress(appId: string): number {
+    const deadline = deadlines.value[appId];
+    if (deadline === undefined) return 0;
+    const remaining = remainingMs(deadline, now.value);
+    return Math.min(1, Math.max(0, 1 - remaining / QUEST_DURATION_MS));
+  }
+
   /** Stops ticking; safe to call more than once. */
   function dispose(): void {
     clearInterval(interval);
   }
 
-  return { deadlines, start, stop, label, dispose };
+  return { deadlines, start, stop, label, progress, dispose };
 }

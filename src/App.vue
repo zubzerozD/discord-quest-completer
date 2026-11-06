@@ -4,6 +4,7 @@ import { cleanupGames, listRunning, playGame, stopGame } from "./backend";
 import { pickExecutable, type GameEntry } from "./catalog/catalog";
 import { createSearch, sortByName } from "./catalog/search";
 import { useCatalog } from "./catalog/useCatalog";
+import { playCompletionChime } from "./chime";
 import { useFavorites } from "./favorites/useFavorites";
 import { notifyQuestComplete } from "./notify";
 import { useQuestTimer } from "./timer/useQuestTimer";
@@ -16,6 +17,7 @@ const { favoriteIds, toggle, isFavorite } = useFavorites();
 
 const query = ref("");
 const playing = ref<Record<string, number>>({});
+const playingNames = ref<Record<string, string>>({});
 const actionError = ref<string | null>(null);
 
 const sorted = computed(() => sortByName(games.value));
@@ -41,6 +43,19 @@ const regularVisible = computed(() => {
 
 const shownRegular = computed(() => regularVisible.value.slice(0, VISIBLE_LIMIT));
 
+/** List of currently active games for the "Now Playing" card. */
+const activeGames = computed(() => {
+  return Object.keys(playing.value)
+    .map((id) => {
+      const game = games.value.find((g) => g.id === id);
+      return {
+        id,
+        name: game?.name ?? playingNames.value[id] ?? "Unknown game",
+        game,
+      };
+    });
+});
+
 function isPlaying(id: string): boolean {
   return id in playing.value;
 }
@@ -48,6 +63,7 @@ function isPlaying(id: string): boolean {
 /** S5: at 00:00 notify the user and auto-close the tracked dummy. */
 async function onTimerExpired(appId: string): Promise<void> {
   const game = games.value.find((g) => g.id === appId);
+  playCompletionChime();
   try {
     await stopGame(appId);
     const next = { ...playing.value };
@@ -82,10 +98,35 @@ async function onPlay(game: GameEntry): Promise<void> {
     actionError.value = `${game.name} has no Windows executable`;
     return;
   }
+
+  // Concurrency guard: Discord only credits one quest at a time.
+  const activeIds = Object.keys(playing.value);
+  if (activeIds.length > 0) {
+    const activeName = playingNames.value[activeIds[0]] ?? "another game";
+    const confirmed = window.confirm(
+      `"${activeName}" is already running.\n\n` +
+      `Discord only credits one quest at a time. ` +
+      `Stop it and start "${game.name}" instead?`,
+    );
+    if (!confirmed) return;
+    // Stop all currently running games
+    for (const id of activeIds) {
+      try {
+        await stopGame(id);
+        questTimer.stop(id);
+      } catch {
+        // Best effort — continue stopping the rest.
+      }
+    }
+    playing.value = {};
+    playingNames.value = {};
+  }
+
   actionError.value = null;
   try {
     const outcome = await playGame(game.id, executable.name, game.name);
     playing.value = { ...playing.value, [game.id]: outcome.pid };
+    playingNames.value = { ...playingNames.value, [game.id]: game.name };
     questTimer.start(game.id);
   } catch (e) {
     actionError.value = e instanceof Error ? e.message : String(e);
@@ -100,6 +141,28 @@ async function onStop(game: GameEntry): Promise<void> {
     const next = { ...playing.value };
     delete next[game.id];
     playing.value = next;
+    const nextNames = { ...playingNames.value };
+    delete nextNames[game.id];
+    playingNames.value = nextNames;
+  } catch (e) {
+    actionError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function onStopById(appId: string): Promise<void> {
+  const game = games.value.find((g) => g.id === appId);
+  if (game) return onStop(game);
+  // Fallback when the game isn't in the catalog (e.g. after a reload)
+  actionError.value = null;
+  try {
+    await stopGame(appId);
+    questTimer.stop(appId);
+    const next = { ...playing.value };
+    delete next[appId];
+    playing.value = next;
+    const nextNames = { ...playingNames.value };
+    delete nextNames[appId];
+    playingNames.value = nextNames;
   } catch (e) {
     actionError.value = e instanceof Error ? e.message : String(e);
   }
@@ -156,6 +219,32 @@ onBeforeUnmount(() => {
       </button>
     </header>
 
+    <!-- ─── Active game card ─── -->
+    <section v-if="activeGames.length" class="now-playing">
+      <div v-for="entry in activeGames" :key="entry.id" class="active-card">
+        <div class="active-header">
+          <span class="active-indicator" />
+          <span class="active-label">Now Playing</span>
+        </div>
+        <div class="active-body">
+          <span class="active-name">{{ entry.name }}</span>
+          <span
+            v-if="questTimer.label(entry.id)"
+            class="active-time"
+          >
+            {{ questTimer.label(entry.id) }}
+          </span>
+          <button class="stop-btn" @click="onStopById(entry.id)">Stop</button>
+        </div>
+        <div class="progress-track">
+          <div
+            class="progress-fill"
+            :style="{ width: `${questTimer.progress(entry.id) * 100}%` }"
+          />
+        </div>
+      </div>
+    </section>
+
     <input
       v-model="query"
       class="search"
@@ -196,7 +285,7 @@ onBeforeUnmount(() => {
 
     <section class="results">
       <p v-if="!results.length && query" class="empty">
-        No games match “{{ query }}”.
+        No games match "{{ query }}".
       </p>
       <ul>
         <li v-for="game in shownRegular" :key="game.id">
@@ -246,6 +335,95 @@ onBeforeUnmount(() => {
 .status.error {
   color: #f23f43;
 }
+
+/* ─── Active game card ─── */
+.now-playing {
+  margin: 1rem 0;
+}
+.active-card {
+  background: #2b2d31;
+  border: 1px solid #5865f2;
+  border-radius: 10px;
+  padding: 0.8rem 1rem 0;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+}
+.active-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.45rem;
+}
+.active-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #57f287;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.active-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #57f287;
+  font-weight: 600;
+}
+.active-body {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+}
+.active-name {
+  flex: 1;
+  font-size: 1.05rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.active-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #f2f3f5;
+  white-space: nowrap;
+}
+.stop-btn {
+  background: #f23f43;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.35rem 1rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+.stop-btn:hover {
+  background: #da373c;
+}
+
+/* ─── Progress bar ─── */
+.progress-track {
+  height: 4px;
+  background: #1e1f22;
+  margin: 0 -1rem;
+  border-radius: 0 0 10px 10px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #5865f2, #57f287);
+  transition: width 0.3s linear;
+  border-radius: 0 2px 2px 0;
+}
+
+/* ─── Search ─── */
 .search {
   width: 100%;
   padding: 0.6rem 0.9rem;
