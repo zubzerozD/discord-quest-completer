@@ -13,6 +13,7 @@
     "tauri": "tauri",
     "build:runner:win": "cargo build --release --manifest-path src-runner/Cargo.toml",
     "copy:runner:win": "node scripts/copy-runner.mjs",
+    "prune:catalog": "node scripts/prune-catalog.mjs",
     "runner:win": "pnpm build:runner:win && pnpm copy:runner:win",
     "dist:win": "pnpm runner:win && pnpm tauri build"
   },
