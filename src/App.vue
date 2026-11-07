@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 import { cleanupGames, listRunning, playGame, stopGame } from "./backend";
 import { pickExecutable, type GameEntry } from "./catalog/catalog";
 import { createSearch, sortByName } from "./catalog/search";
@@ -99,29 +101,7 @@ async function onPlay(game: GameEntry): Promise<void> {
     return;
   }
 
-  // Concurrency guard: Discord only credits one quest at a time.
-  const activeIds = Object.keys(playing.value);
-  if (activeIds.length > 0) {
-    const activeName = playingNames.value[activeIds[0]] ?? "another game";
-    const confirmed = window.confirm(
-      `"${activeName}" is already running.\n\n` +
-      `Discord only credits one quest at a time. ` +
-      `Stop it and start "${game.name}" instead?`,
-    );
-    if (!confirmed) return;
-    // Stop all currently running games
-    for (const id of activeIds) {
-      try {
-        await stopGame(id);
-        questTimer.stop(id);
-      } catch {
-        // Best effort — continue stopping the rest.
-      }
-    }
-    playing.value = {};
-    playingNames.value = {};
-  }
-
+  // No concurrency guard – allow multiple games simultaneously.
   actionError.value = null;
   try {
     const outcome = await playGame(game.id, executable.name, game.name);
@@ -188,9 +168,27 @@ async function onCleanup(): Promise<void> {
   }
 }
 
+/** Auto-updater (Tauri v2): check on launch, confirm, download, install, relaunch. */
+async function checkForUpdates(): Promise<void> {
+  try {
+    const update = await check();
+    if (!update) return;
+    const confirmed = window.confirm(
+      `Version ${update.version} is available.\n\nInstall it now?`,
+    );
+    if (!confirmed) return;
+    await update.downloadAndInstall();
+    await relaunch();
+  } catch (e) {
+    // Best-effort: an update failure must never block the app.
+    console.warn("update check failed", e);
+  }
+}
+
 onMounted(() => {
   void refresh();
   void refreshRunning();
+  void checkForUpdates();
 });
 
 onBeforeUnmount(() => {
