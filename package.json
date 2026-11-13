@@ -16,6 +16,7 @@
     "copy:runner:win": "node scripts/copy-runner.mjs",
     "prune:catalog": "node scripts/prune-catalog.mjs",
     "runner:win": "pnpm build:runner:win && pnpm copy:runner:win",
+    "pack:portable": "node scripts/pack-portable.mjs",
     "dist:win": "pnpm runner:win && pnpm tauri build"
   },
   "dependencies": {

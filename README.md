@@ -22,7 +22,22 @@ Built with **Tauri v2 + Rust + Vue 3**, designed for lightweight performance, lo
 - **Safe process handling** — only the exact process the app spawned is
   stopped (tracked by PID), never every process sharing the image name.
 
-## Requirements (Windows only)
+## Descargas (Downloads)
+
+Puedes descargar la última versión compilada desde la sección de **[Releases](https://github.com/zubzerozD/discord-quest-completer/releases)**.
+
+| Opción | Archivo | ¿Cuál elegir? |
+| :--- | :--- | :--- |
+| 🚀 **Instalador (`.exe`)** | `Discord.Quest.Completer_..._x64-setup.exe` | **Recomendado:** Instalación tradicional con acceso directo en el escritorio y soporte para auto-actualización. |
+| 🎒 **Portable (`.zip`)** | `Discord-Quest-Completer-Portable.zip` | **Sin instalación:** Solo descomprimes en cualquier carpeta o pendrive y ejecutas directamente sin tocar el sistema. |
+
+> ### ⚠️ Aviso de Windows SmartScreen ("Windows protegió su PC")
+> Al ser una herramienta independiente y gratuita sin un certificado de firma comercial corporativo ($300+/año), Windows mostrará la pantalla preventiva de SmartScreen al abrir el instalador o el ejecutable portable por primera vez.  
+> **Es totalmente seguro continuar:**
+> 1. Haz clic en **"Más información"** (*More info*).
+> 2. Haz clic en **"Ejecutar de todas formas"** (*Run anyway*).
+
+## Requirements (Development only)
 
 - [Rust](https://rustup.rs/) (stable, with the MSVC toolchain)
 - [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
@@ -65,6 +80,14 @@ One command, end to end:
 3. `pnpm tauri build` — builds the frontend (`pnpm build`) and bundles the app
 
 Artifacts land in `src-tauri/target/release/bundle/` (NSIS installer + MSI).
+
+To package the standalone portable ZIP locally:
+
+```powershell
+pnpm pack:portable
+```
+
+Artifact lands in `dist-portable/Discord-Quest-Completer-Portable.zip`.
 
 ## Usage
 
